@@ -7,6 +7,7 @@ const initialState = {
   userLocation: null, // { lat, lng }
   driverLocation: null, // { lat, lng }
   status: 'idle', // idle, finding_driver, driver_assigned, in_progress, completed
+  paymentStatus: 'unpaid',
   estimatedDistance: null,
   estimatedDuration: null,
   error: null,
@@ -29,8 +30,11 @@ const rideSlice = createSlice({
     },
     completeRide: (state) => {
       state.status = 'completed';
-      state.bookingId = null;
       state.driverLocation = null;
+      state.paymentStatus = 'unpaid';
+    },
+    setPaymentPaid: (state) => {
+      state.paymentStatus = 'paid';
     },
 
     // New reducers
@@ -68,6 +72,7 @@ export const {
   setUserLocation,
   setEstimates,
   setError,
+  setPaymentPaid,
   resetRide,
 } = rideSlice.actions;
 

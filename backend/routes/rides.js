@@ -166,14 +166,33 @@ router.put('/cancel/:id', verifyToken, async (req, res) => {
 // Accept a ride
 router.put('/accept/:id', verifyToken, async (req, res) => {
     try {
+        if (req.user.role !== 'driver') {
+            return res.status(403).json({ message: 'Only drivers can accept rides' });
+        }
+
         const booking = await Booking.findById(req.params.id);
         if (!booking) {
             return res.status(404).json({ message: 'Booking not found' });
         }
+
+        if (['completed', 'cancelled'].includes(booking.status)) {
+            return res.status(409).json({ message: `This ride is already ${booking.status}` });
+        }
         
-        const driver = await Driver.findOne({ userId: req.user.id });
+        let driver = await Driver.findOne({ userId: req.user.id });
         if (!driver) {
-            return res.status(404).json({ message: 'Driver profile not found' });
+            driver = await Driver.create({
+                userId: req.user.id,
+                isAvailable: true,
+                vehicleDetails: 'Not specified'
+            });
+        }
+
+        const alreadyAssignedToAnotherDriver =
+            booking.driverId && booking.driverId.toString() !== driver._id.toString();
+
+        if (alreadyAssignedToAnotherDriver) {
+            return res.status(409).json({ message: 'This ride has already been accepted by another driver' });
         }
         
         booking.driverId = driver._id;

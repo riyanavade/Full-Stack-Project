@@ -3,11 +3,23 @@ const crypto = require('crypto');
 const Payment = require('../models/Payment');
 const Booking = require('../models/Booking');
 
-// Initialize Razorpay instance with test credentials
-const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+const createRazorpayClient = () => {
+    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+        throw new Error('Razorpay keys are not configured');
+    }
+
+    return new Razorpay({
+        key_id: process.env.RAZORPAY_KEY_ID,
+        key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+};
+
+const compareSignatures = (generatedSignature, receivedSignature) => {
+    const generated = Buffer.from(generatedSignature, 'hex');
+    const received = Buffer.from(receivedSignature || '', 'hex');
+
+    return generated.length === received.length && crypto.timingSafeEqual(generated, received);
+};
 
 /**
  * @route   POST /api/payment/create-order
@@ -18,10 +30,26 @@ exports.createOrder = async (req, res) => {
     try {
         const { rideId } = req.body;
 
+        if (!rideId) {
+            return res.status(400).json({ message: 'Ride ID is required' });
+        }
+
         // Fetch ride details to get the exact fare
         const ride = await Booking.findById(rideId);
         if (!ride) {
             return res.status(404).json({ message: 'Ride not found' });
+        }
+
+        if (ride.passengerId.toString() !== req.user.id) {
+            return res.status(403).json({ message: 'You can only pay for your own ride' });
+        }
+
+        if (ride.status !== 'completed') {
+            return res.status(400).json({ message: 'Payment is allowed only after ride completion' });
+        }
+
+        if (ride.paymentStatus === 'paid') {
+            return res.status(409).json({ message: 'This ride has already been paid' });
         }
 
         // Razorpay expects amount in the smallest currency unit (paise)
@@ -35,11 +63,15 @@ exports.createOrder = async (req, res) => {
         const options = {
             amount,
             currency: 'INR',
-            receipt: `receipt_order_${rideId}`,
-            payment_capture: 1 // Auto capture
+            receipt: `ride_${rideId}`.slice(0, 40),
+            notes: {
+                rideId,
+                userId: req.user.id
+            }
         };
 
         // Call Razorpay API to create order
+        const razorpay = createRazorpayClient();
         const order = await razorpay.orders.create(options);
 
         if (!order) {
@@ -59,9 +91,11 @@ exports.createOrder = async (req, res) => {
         await newPayment.save();
 
         res.status(200).json({
+            keyId: process.env.RAZORPAY_KEY_ID,
             orderId: order.id,
             amount: order.amount,
             currency: order.currency,
+            rideId,
         });
 
     } catch (error) {
@@ -79,6 +113,19 @@ exports.verifyPayment = async (req, res) => {
     try {
         const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
 
+        if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+            return res.status(400).json({ message: 'Payment verification details are required' });
+        }
+
+        const existingPayment = await Payment.findOne({
+            razorpayOrderId,
+            user: req.user.id
+        });
+
+        if (!existingPayment) {
+            return res.status(404).json({ message: 'Payment record not found' });
+        }
+
         // Create the expected signature using our secret
         const generatedSignature = crypto
             .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
@@ -86,28 +133,30 @@ exports.verifyPayment = async (req, res) => {
             .digest('hex');
 
         // Verify if signatures match
-        if (generatedSignature !== razorpaySignature) {
+        if (!compareSignatures(generatedSignature, razorpaySignature)) {
              // If they don't match, update the payment record as failed
              await Payment.findOneAndUpdate(
-                 { razorpayOrderId: razorpayOrderId },
+                 { razorpayOrderId, user: req.user.id },
                  { paymentStatus: 'Failed' }
              );
+             await Booking.findByIdAndUpdate(existingPayment.ride, { paymentStatus: 'failed' });
             return res.status(400).json({ message: 'Payment verification failed' });
         }
 
         // Signatures match, payment is legitimate
         const payment = await Payment.findOneAndUpdate(
-            { razorpayOrderId: razorpayOrderId },
+            { razorpayOrderId, user: req.user.id },
             { 
-                razorpayPaymentId: razorpayPaymentId,
+                razorpayPaymentId,
                 paymentStatus: 'Paid' 
             },
             { new: true } // Return the updated document
         );
 
-        if (!payment) {
-            return res.status(404).json({ message: 'Payment record not found' });
-        }
+        await Booking.findByIdAndUpdate(payment.ride, {
+            paymentStatus: 'paid',
+            razorpayPaymentId
+        });
 
         res.status(200).json({ 
             message: 'Payment verified successfully',

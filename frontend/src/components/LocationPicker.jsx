@@ -32,11 +32,21 @@ const LocationPicker = ({ onPickupChange, onDropoffChange, pickup, dropoff }) =>
     }
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&countrycodes=in`
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&countrycodes=in`,
+        {
+          headers: {
+            'Accept': 'application/json',
+          },
+          referrerPolicy: 'no-referrer',
+        }
       );
+      if (!res.ok) {
+        throw new Error(`Address search failed: ${res.status}`);
+      }
       const data = await res.json();
       setSuggestions(data);
-    } catch {
+    } catch (err) {
+      console.error('Location search error:', err);
       setError('Failed to search addresses');
       setSuggestions([]);
     }

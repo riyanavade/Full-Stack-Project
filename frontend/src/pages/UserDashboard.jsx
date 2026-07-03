@@ -11,6 +11,7 @@ import {
   setUserLocation,
   setEstimates,
   setError,
+  setPaymentPaid,
   resetRide,
   completeRide,
 } from '../redux/rideSlice';
@@ -20,6 +21,7 @@ import axios from 'axios';
 import MapComponent from '../components/MapComponent';
 import LocationPicker from '../components/LocationPicker';
 import DriverTracker from '../components/DriverTracker';
+import PaymentButton from '../components/PaymentButton';
 
 const UserDashboard = () => {
   const user = useSelector((state) => state.auth.user);
@@ -31,6 +33,8 @@ const UserDashboard = () => {
   const isDriver = user?.role === 'driver';
   const [pendingRides, setPendingRides] = useState([]);
   const [acceptNotification, setAcceptNotification] = useState(null);
+  const [acceptingRideId, setAcceptingRideId] = useState(null);
+  const [acceptError, setAcceptError] = useState('');
 
   // Socket.IO connection
   useEffect(() => {
@@ -170,9 +174,12 @@ const UserDashboard = () => {
   };
 
   const handleAcceptRide = async (bookingId, idx) => {
+    setAcceptingRideId(bookingId);
+    setAcceptError('');
+
     try {
       const token = localStorage.getItem('token');
-      await axios.put(
+      const response = await axios.put(
         `http://localhost:5000/api/rides/accept/${bookingId}`,
         {},
         {
@@ -186,9 +193,14 @@ const UserDashboard = () => {
         socket.emit('joinRide', { bookingId });
       }
 
-      setPendingRides((prev) => prev.filter((_, i) => i !== idx));
+      setPendingRides((prev) => prev.filter((rideRequest, i) => (
+        i !== idx && rideRequest._id !== response.data.booking?._id
+      )));
     } catch (err) {
       console.error('Error accepting ride:', err);
+      setAcceptError(err.response?.data?.message || 'Unable to accept ride. Please try again.');
+    } finally {
+      setAcceptingRideId(null);
     }
   };
 
@@ -207,6 +219,10 @@ const UserDashboard = () => {
     } catch (err) {
       console.error('Error completing ride:', err);
     }
+  };
+
+  const handlePaymentSuccess = () => {
+    dispatch(setPaymentPaid());
   };
 
   const handleLogout = () => {
@@ -298,6 +314,11 @@ const UserDashboard = () => {
                 <h3 className="text-lg font-semibold mb-3 text-gray-200">
                   Pending Ride Requests
                 </h3>
+                {acceptError && (
+                  <p className="mb-3 rounded-lg border border-red-500/40 bg-red-900/30 px-3 py-2 text-sm text-red-200">
+                    {acceptError}
+                  </p>
+                )}
                 {pendingRides.length === 0 ? (
                   <p className="text-sm text-gray-400">
                     No pending requests at the moment. Go online to start receiving ride requests.
@@ -319,8 +340,11 @@ const UserDashboard = () => {
                           <span className="text-green-400 font-bold text-lg">₹{req.fare}</span>
                           <button
                             onClick={() => handleAcceptRide(req._id, idx)}
-                            className="bg-green-600 hover:bg-green-500 text-white text-sm font-semibold py-1.5 px-4 rounded-lg"
-                          >Accept</button>
+                            disabled={acceptingRideId === req._id}
+                            className="bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-semibold py-1.5 px-4 rounded-lg"
+                          >
+                            {acceptingRideId === req._id ? 'Accepting...' : 'Accept'}
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -461,10 +485,21 @@ const UserDashboard = () => {
                   )}
 
                   {ride.status === 'completed' && (
-                    <div>
+                    <div className="space-y-4">
                       <h3 className="text-lg font-bold text-green-400">
                         Ride completed!
                       </h3>
+                      {ride.paymentStatus === 'paid' ? (
+                        <div className="rounded-lg bg-green-800/80 p-4 border border-green-500 text-green-100">
+                          Payment completed successfully.
+                        </div>
+                      ) : (
+                        <PaymentButton
+                          rideId={ride.bookingId}
+                          fare={estimatedFare}
+                          onSuccess={handlePaymentSuccess}
+                        />
+                      )}
                     </div>
                   )}
                 </div>

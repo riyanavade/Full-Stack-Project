@@ -1,21 +1,33 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { createOrder, verifyPayment, resetPaymentState } from '../redux/paymentSlice';
 
-const PaymentButton = ({ rideId, fare }) => {
+const PaymentButton = ({ rideId, fare, onSuccess }) => {
     const dispatch = useDispatch();
     const navigate = useNavigate();
+    const user = useSelector((state) => state.auth.user);
     const { loading, currentOrder, error, success } = useSelector((state) => state.payment);
+    const [scriptLoaded, setScriptLoaded] = useState(Boolean(window.Razorpay));
+    const [scriptError, setScriptError] = useState(null);
 
     // Load Razorpay Script dynamically
     useEffect(() => {
+        if (window.Razorpay) {
+            setScriptLoaded(true);
+            return undefined;
+        }
+
         const script = document.createElement('script');
         script.src = 'https://checkout.razorpay.com/v1/checkout.js';
         script.async = true;
+        script.onload = () => setScriptLoaded(true);
+        script.onerror = () => setScriptError('Unable to load Razorpay checkout. Please check your connection.');
         document.body.appendChild(script);
         return () => {
-            document.body.removeChild(script);
+            if (script.parentNode) {
+                script.parentNode.removeChild(script);
+            }
         };
     }, []);
 
@@ -23,11 +35,11 @@ const PaymentButton = ({ rideId, fare }) => {
     useEffect(() => {
         if (currentOrder && window.Razorpay) {
             const options = {
-                key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_YOUR_KEY_ID_HERE', // Needs to be added to frontend env
+                key: currentOrder.keyId,
                 amount: currentOrder.amount, // Amount is in paise
                 currency: currentOrder.currency,
-                name: 'Driver Tracking System',
-                description: 'Ride Fare Payment',
+                name: 'TrackMyRide',
+                description: 'Ride fare payment',
                 order_id: currentOrder.orderId,
                 handler: function (response) {
                     // On success, verify the signature
@@ -39,55 +51,56 @@ const PaymentButton = ({ rideId, fare }) => {
                     dispatch(verifyPayment(verificationData));
                 },
                 prefill: {
-                    name: 'Test User',
-                    email: 'test@example.com',
-                    contact: '9999999999'
+                    name: user?.name || '',
+                    email: user?.email || '',
+                    contact: user?.phone || ''
                 },
                 theme: {
-                    color: '#3399cc'
+                    color: '#2563eb'
                 }
             };
             
             const rzp = new window.Razorpay(options);
             
-            rzp.on('payment.failed', function (response) {
-                console.error('Payment Failed', response.error);
+            rzp.on('payment.failed', function () {
+                dispatch(resetPaymentState());
                 navigate('/payment-failed');
             });
 
             rzp.open();
         }
-    }, [currentOrder, dispatch, navigate]);
+    }, [currentOrder, dispatch, navigate, user]);
 
     // Handle verification success
     useEffect(() => {
         if (success) {
             dispatch(resetPaymentState());
+            if (onSuccess) onSuccess();
             navigate('/payment-success');
         }
-    }, [success, dispatch, navigate]);
+    }, [success, dispatch, navigate, onSuccess]);
 
-    const handlePaymentClick = () => {
-        if (rideId) {
+    const handlePaymentClick = useCallback(() => {
+        if (rideId && scriptLoaded) {
             dispatch(createOrder(rideId));
         }
-    };
+    }, [dispatch, rideId, scriptLoaded]);
 
     return (
         <div className="mt-4">
-            {error && <p className="text-red-500 mb-2">{error}</p>}
+            {(error || scriptError) && <p className="text-red-500 mb-2">{error || scriptError}</p>}
             <button 
                 onClick={handlePaymentClick} 
-                disabled={loading}
-                className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition duration-300 disabled:opacity-50 flex justify-center items-center"
+                disabled={loading || !scriptLoaded || !rideId}
+                className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center"
             >
-                {loading ? (
+                {loading || !scriptLoaded ? (
                     <svg className="animate-spin h-5 w-5 mr-3 text-white" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                 ) : (
-                    `Proceed to Payment (₹${fare})`
+                    `Proceed to Payment (Rs. ${fare || 0})`
                 )}
             </button>
         </div>
