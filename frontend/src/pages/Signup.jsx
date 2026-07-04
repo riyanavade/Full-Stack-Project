@@ -3,6 +3,7 @@ import { useDispatch } from 'react-redux';
 import { loginSuccess } from '../redux/authSlice';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
+import { API_BASE_URL } from '../config';
 
 const Signup = () => {
   const [name, setName] = useState('');
@@ -15,7 +16,7 @@ const Signup = () => {
   const handleSignup = async (e) => {
     e.preventDefault();
     try {
-      const res = await axios.post('http://localhost:5000/api/auth/register', { name, email, password, role });
+      const res = await axios.post(`${API_BASE_URL}/api/auth/register`, { name, email, password, role });
       dispatch(loginSuccess(res.data));
       navigate(res.data.user.role === 'admin' ? '/admin-dashboard' : '/user-dashboard');
     } catch (err) {

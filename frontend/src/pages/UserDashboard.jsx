@@ -22,6 +22,7 @@ import MapComponent from '../components/MapComponent';
 import LocationPicker from '../components/LocationPicker';
 import DriverTracker from '../components/DriverTracker';
 import PaymentButton from '../components/PaymentButton';
+import { API_BASE_URL, SOCKET_URL } from '../config';
 
 const UserDashboard = () => {
   const user = useSelector((state) => state.auth.user);
@@ -38,7 +39,7 @@ const UserDashboard = () => {
 
   // Socket.IO connection
   useEffect(() => {
-    const newSocket = io('http://localhost:5000');
+    const newSocket = io(SOCKET_URL);
     setSocket(newSocket);
 
     newSocket.on('locationUpdate', (data) => {
@@ -144,7 +145,7 @@ const UserDashboard = () => {
     try {
       const token = localStorage.getItem('token');
       const response = await axios.post(
-        'http://localhost:5000/api/rides/book',
+        `${API_BASE_URL}/api/rides/book`,
         {
           pickupLocation: ride.pickup,
           dropoffLocation: ride.dropoff,
@@ -180,7 +181,7 @@ const UserDashboard = () => {
     try {
       const token = localStorage.getItem('token');
       const response = await axios.put(
-        `http://localhost:5000/api/rides/accept/${bookingId}`,
+        `${API_BASE_URL}/api/rides/accept/${bookingId}`,
         {},
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -209,7 +210,7 @@ const UserDashboard = () => {
     try {
       const token = localStorage.getItem('token');
       await axios.put(
-        `http://localhost:5000/api/rides/complete/${ride.bookingId}`,
+        `${API_BASE_URL}/api/rides/complete/${ride.bookingId}`,
         {},
         {
           headers: { Authorization: `Bearer ${token}` },
